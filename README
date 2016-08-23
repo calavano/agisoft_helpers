@@ -1,0 +1,30 @@
+These are some scripts that are being used to help automate the use of Photoscan.
+
+Many of these will be a work in progress and incomplete, so assume that they will not do what you think they will do.
+
+
+== master.py
+
+This is mostly just all of the other scripts lumped into one. Rather than performing the tasks directly, this script will create menu items for running each task.
+
+== stage_one.py
+
+This script makes a few assumptions.
+
+1) Directory structure is as follows,
+
+[identifier]
+	\JPG\
+		\SIDEA\ -- location of jpegs for top view
+		\SIDEB\ -- location of jpegs for bottom view
+	\PROCESSING\ -- location to be used for psx file
+
+2) The 'top' and 'bottom' sets of images are split in to the SIDEA and SIDEB directories.
+
+3) 'Camera calibration' grouping will be automatically determined by Agisoft. This should be OK for changes that are reflected in the EXIF data of the JPG files.
+
+4) Network processing is being used.
+
+== stage_two.py
+
+This will duplicate the "Aligned" chunks for optimization. 
