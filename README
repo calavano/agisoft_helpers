@@ -27,4 +27,8 @@ This script makes a few assumptions.
 
 == stage_two.py
 
-This will duplicate the "Aligned" chunks for optimization. 
+This will duplicate the "Aligned" chunks for optimization.
+
+== stage_three.py
+
+This will create the dense cloud, mesh, and texture.
