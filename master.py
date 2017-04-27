@@ -124,8 +124,6 @@ def load_images():
 # Uses encoded markers and known values in meters.
 #
 def add_scalebars():
-	global doc
-
 	accuracy = 0.0001
 
 	pairings = ['1_3', '2_4', '49_50', '50_51', '52_53', '53_54', '55_56', '57_58', '58_59', '60_61', '61_62', '63_64']
