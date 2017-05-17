@@ -1,7 +1,6 @@
 import os
 import re
 import PhotoScan
-import numpy as np
 import math
 
 # Specify folder of unique identifier.
@@ -27,9 +26,9 @@ PROCESS_FOLDER = 'PROCESSING'
 EXPORT_FOLDER = 'EXPORT'
 MODE = 'network'
 
+#
 # Handles starting a network batch jobs.
 # Accepts an array of hashes of tasks/parameters.
-#
 def start_network_batch_process(chunks, tasks):
     net_tasks = []
 
@@ -53,19 +52,9 @@ def start_network_batch_process(chunks, tasks):
 #
 # Loads images from two 'sides', aligns cameras, and detects markers.
 def load_images():
-    chunk_list = PhotoScan.app.document.chunks
+    #chunk_list = PhotoScan.app.document.chunks
 
-    if any("Aligned Side A" in s for s in chunk_list) is False:
-        chunk_aa = PhotoScan.app.document.addChunk()
-        chunk_aa.label = "Aligned Side A"
-
-    if any("Aligned Side B" in s for s in chunk_list) is False:
-        chunk_ab = PhotoScan.app.document.addChunk()
-        chunk_ab.label = "Aligned Side B"
-
-    batch_chunks = [chunk_aa, chunk_ab]
-
-    # This will create two chunks and load the images from SIDEA/SIDEB into each.
+    # This will create N chunks and load the images from SIDEA/SIDEB/SIDEN into each.
     path_druid = PhotoScan.app.getExistingDirectory("Specify DRUID path:")
     path_druid = path_druid.replace('\\', '/')
 
@@ -73,18 +62,15 @@ def load_images():
 
     path_photos = path_druid + '/' + IMAGES_FOLDER + '/'
 
-    # TODO: create a loop for a N+X number of 'sides'.
-    image_list_a = os.listdir(path_photos + '/SIDEA/')
-    image_list_b = os.listdir(path_photos + '/SIDEB/')
+    folders = os.listdir(path_photos)
+    for side_index, side in enumerate(folders):
+        image_list = os.listdir(path_photos + '/' + side)
+        for image_index, image in enumerate(image_list):
+            image_list[image_index] = path_photos + '/' + side + '/' + image
 
-    for index, i in enumerate(image_list_a):
-        image_list_a[index] = path_photos + "/SIDEA/" + i
-
-    for index, i in enumerate(image_list_b):
-        image_list_b[index] = path_photos + "/SIDEB/" + i
-
-    chunk_aa.addPhotos(image_list_a)
-    chunk_ab.addPhotos(image_list_b)
+        chunk = PhotoScan.app.document.addChunk()
+        chunk = 'Aligned Side ' + str(side_index)
+        chunk.addPhotos(image_list)
 
     # Save file as .psx as it is requried for netwrok processing.
     save_path = path_druid + '/' + PROCESS_FOLDER + '/'
@@ -97,6 +83,10 @@ def load_images():
     #     PhotoScan.app.messageBox("Can’t save project")
     PhotoScan.app.document.save(save_file)
 
+    chunks = []
+    for chunk in PhotoScan.app.document.chunks:
+        if chunk.label.startswith("Aligned"):
+            chunks.append(chunk)
     tasks = [{'name': 'MatchPhotos',
               'downscale': int(PhotoScan.HighestAccuracy),
               'network_distribute': True,
@@ -108,7 +98,7 @@ def load_images():
               'tolerance': '75',
               'network_distribute': True}]
 
-    start_network_batch_process(batch_chunks, tasks)
+    start_network_batch_process(chunks, tasks)
 
 #
 # Add scale bars.
@@ -143,15 +133,9 @@ def add_scalebars():
 # without worrying about needing to perform a new alignment.
 def setup_optimize():
     for chunk in PhotoScan.app.document.chunks:
-
-        if chunk.label == "Aligned Side A":
-            chunk_oa = chunk.copy()
-            chunk_oa.label = "Optimized Side A"
-            chunk.enabled = False
-
-        if chunk.label == "Aligned Side B":
-            chunk_ob = chunk.copy()
-            chunk_ob.label = "Optimized Side B"
+        if chunk.label.startswith('Aligned'):
+            new_chunk = chunk.copy()
+            new_chunk.label = chunk.label.replace('Aligned', 'Optimized')
             chunk.enabled = False
 
 #
@@ -246,7 +230,7 @@ def post_optimize_noalign():
 
 #
 # Builds dense cloud, model, texture, creates maks, aligns chunks.
-def post_optimize_two_side():
+def post_optimize_n_side():
     chunks = []
 
     for chunk in PhotoScan.app.document.chunks:
@@ -302,13 +286,17 @@ def setup_merged_optimization():
         if chunk.label == "Merged Chunk":
             chunk_om = chunk.copy()
             chunk_om.label = "Optimized Merged Chunk"
-            #chunk_oa.accuracy_tiepoints = 0.1
             chunk.enabled = False
 
 #
 # Creates final model and textures
-#
 def create_dense_and_model():
+    chunks = []
+
+    for chunk in PhotoScan.app.document.chunks:
+        if chunk.label == ("Optimized Merged Chunk"):
+            chunks.append(chunk)
+
     tasks = [{'name': 'BuildDenseCloud',
               'downscale': int(PhotoScan.HighAccuracy),
               'network_distribute': True},
@@ -320,7 +308,7 @@ def create_dense_and_model():
               'texture_size': 4096,
               'network_distribute': True}]
 
-    start_network_batch_process([PhotoScan.app.document.chunk], tasks)
+    start_network_batch_process(chunks, tasks)
 
 #
 # Deletes selected points and optimizes with some options.
@@ -420,6 +408,7 @@ def gradual_selection_reprojectionerror():
             thresh_jump = thresh_jump / 10
 
     return thresh
+
 #
 # Performs a gradual selection using 'reconstruction uncertainty'
 # Uses the hard-coded value of '10'
@@ -432,7 +421,6 @@ def gradual_selection_reconstructionuncertainty_ten():
 #
 # Performs a gradual selection using 'reconstruction uncertainty'
 # Blindly selects 10% of the points.
-#
 def gradual_selection_reconstructionuncertainty():
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
@@ -512,10 +500,11 @@ def optimize_all():
 # WARNING: This immediately deletes all other chunks.
 def revert_to_clean():
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label != 'Aligned Side A' and chunk.label != 'Aligned Side B':
-            PhotoScan.app.document.remove(chunk)
-        else:
+        if chunk.label.startswith("Aligned"):
             chunk.enabled = True
+        else:
+            PhotoScan.app.document.remove(chunk)
+
 #
 # Moves viewport to face the center of the ROI box.
 # This doesn't seem to always work.
@@ -527,6 +516,7 @@ def reset_view():
 #
 # Attempts to create the region ROI. This places the center of the ROI region
 # at the midpoint of all of the scale bar markers.
+# NOTE: This doesn't actually do anything yet.
 def create_roi():
     x_axis, y_axis, z_axis = 0, 0, 0
 
@@ -535,7 +525,6 @@ def create_roi():
             x_axis, y_axis, z_axis = 0, 0, 0
             num_markers = chunk.markers.__len__()
             for marker in chunk.markers:
-                # position = marker.position
                 x_axis += marker.position.x
                 y_axis += marker.position.y
                 z_axis += marker.position.z
@@ -550,28 +539,24 @@ def create_roi():
             newregion.center = PhotoScan.Vector([cent_x, cent_y, cent_z])
             chunk.region = newregion
 
-            #
-            # marker = PhotoScan.app.document.chunk.markers[0]
-            # vector = marker.position
-            # x = marker.position.x
-            # x y z
-            # Vector([0.7479940243319407, -1.4430349960110231, -5.8724660659394265])
-            # Vector([-1.6652483720013491, -0.3325686787498139, -7.089723067502055])
-            # Vector([-0.028839785332500246, 1.5206106060029403, -8.642452896180526])
-            # Vector([2.3800205218926234, 0.4360515674969152, -7.401010090930162])
-            # Size = Vector([4.026988702016849, 0.5133328430585171, 1.2496546164023838])
-
 #
 # Setup Menus
 PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import Images", load_images)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2a. CHI Optimize", optimize_chi)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", optimize_new)
-PhotoScan.app.addMenuItem("Automate/Flipflop/3. Model, Mask, Align", post_optimize_two_side)
+PhotoScan.app.addMenuItem("Automate/Flipflop/3. Model, Mask, Align", post_optimize_n_side)
 PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge and Align Sides", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/5. Optimize Merged", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/6. Create Dense, Model, and Texture",
                           create_dense_and_model)
 PhotoScan.app.addMenuItem("Automate/Flipflop/7. Export Models", export_models)
+
+PhotoScan.app.addMenuItem("Automate/One Side/1. Import Images", load_images)
+PhotoScan.app.addMenuItem("Automate/One Side/2a. CHI Optimize", optimize_chi)
+PhotoScan.app.addMenuItem("Automate/One Side/2b. New Optimize", optimize_new)
+PhotoScan.app.addMenuItem("Automate/One Side/3. Create Dense, Model, and Texture",
+                          create_dense_and_model)
+PhotoScan.app.addMenuItem("Automate/One Side/4. Export Models", export_models)
 
 PhotoScan.app.addMenuItem("Reset/Back to Align", revert_to_clean)
 PhotoScan.app.addMenuItem("Reset/Reset View", reset_view)
