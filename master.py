@@ -87,18 +87,29 @@ def load_images():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Aligned"):
             chunks.append(chunk)
-    tasks = [{'name': 'MatchPhotos',
-              'downscale': int(PhotoScan.HighestAccuracy),
-              'network_distribute': True,
-              'keypoint_limit': '80000',
-              'tiepoint_limit': '0'},
-             {'name': 'AlignCameras',
-              'network_distribute': True},
-             {'name': 'DetectMarkers',
-              'tolerance': '75',
-              'network_distribute': True}]
 
-    start_network_batch_process(chunks, tasks)
+    if MODE == 'network':
+        tasks = [{'name': 'MatchPhotos',
+                  'downscale': int(PhotoScan.HighestAccuracy),
+                  'network_distribute': True,
+                  'keypoint_limit': '80000',
+                  'tiepoint_limit': '0'},
+                 {'name': 'AlignCameras',
+                  'network_distribute': True},
+                 {'name': 'DetectMarkers',
+                  'tolerance': '75',
+                  'network_distribute': True}]
+        start_network_batch_process(chunks, tasks)
+    else:
+        for chunk in chunks:
+            chunk.matchPhotos(accuracy=PhotoScan.HighestAccuracy,
+                              generic_preselection=True,
+                              reference_preselection=False)
+            chunk.alignCameras()
+            chunk.detectMarkers(type=PhotoScan.HighestAccuracy,
+                                tolerance=75,
+                                inverted=False,
+                                noparity=False)
 
 #
 # Add scale bars.
@@ -214,64 +225,87 @@ def post_optimize_noalign():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             chunks.append(chunk)
+    if MODE == 'network':
+        tasks = [{'name': 'BuildDenseCloud',
+                  'downscale': int(PhotoScan.HighAccuracy),
+                  'network_distribute': True},
+                 {'name': 'BuildModel',
+                  'face_count': 3,
+                  'network_distribute': True},
+                 {'name': 'BuildUV'},
+                 {'name': 'BuildTexture',
+                  'texture_count': 1,
+                  'texture_size': 4096,
+                  'network_distribute': True}]
+        start_network_batch_process(chunks, tasks)
+    else:
+        for chunk in cunks:
+            chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
+            chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
+            chunk.buildUV(mapping=PhotoScan.GenericMapping)
+            chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
 
-    tasks = [{'name': 'BuildDenseCloud',
-              'downscale': int(PhotoScan.HighAccuracy),
-              'network_distribute': True},
-             {'name': 'BuildModel',
-              'face_count': 3,
-              'network_distribute': True},
-             {'name': 'BuildUV'},
-             {'name': 'BuildTexture',
-              'texture_count': 1,
-              'texture_size': 4096,
-              'network_distribute': True}]
-
-    start_network_batch_process(chunks, tasks)
 
 #
 # Builds dense cloud, model, texture, creates maks, aligns chunks.
 def post_optimize_n_side():
     chunks = []
-
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             chunks.append(chunk)
-
-    tasks = [{'name': 'BuildDenseCloud',
-              'downscale': int(PhotoScan.HighAccuracy),
-              'network_distribute': True},
-             {'name': 'BuildModel',
-              'face_count': 3,
-              'network_distribute': True},
-             {'name': 'BuildUV'},
-             {'name': 'BuildTexture',
-              'texture_count': 1,
-              'texture_size': 4096,
-              'network_distribute': True},
-             {'name': 'ImportMasks',
-              'method': 3,
-              'network_distribute': True},
-             {'name': 'AlignChunks',
-              'match_filter_mask': 1,
-              'match_point_limit': 80000,
-              'network_distribute': True}]
-
-    start_network_batch_process(chunks, tasks)
+    if MODE == 'network':
+        tasks = [{'name': 'BuildDenseCloud',
+                  'downscale': int(PhotoScan.HighAccuracy),
+                  'network_distribute': True},
+                 {'name': 'BuildModel',
+                  'face_count': 3,
+                  'network_distribute': True},
+                 {'name': 'BuildUV'},
+                 {'name': 'BuildTexture',
+                  'texture_count': 1,
+                  'texture_size': 4096,
+                  'network_distribute': True},
+                 {'name': 'ImportMasks',
+                  'method': 3,
+                  'network_distribute': True},
+                 {'name': 'AlignChunks',
+                  'match_filter_mask': 1,
+                  'match_point_limit': 80000,
+                  'network_distribute': True}]
+        start_network_batch_process(chunks, tasks)
+    else:
+        for chunk in chunks:
+            chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
+            chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
+            chunk.buildUV(mapping=PhotoScan.GenericMapping)
+            chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
+            # importMasks(path=’‘, source=MaskSourceAlpha, operation=MaskOperationReplacement,
+            #             tolerance=10[,cameras][, progress])
+            # document.alignChunks(chunks, reference, method=’points’, fix_scale=False,
+            #                      accuracy=HighAccuracy, preselection=False, filter_mask=False,
+            #                      point_limit=40000[, progress])
 
 #
 # Merge chunks and align masked photos.
 def merged_and_align():
-    tasks = [{'name': 'MatchPhotos',
-              'downscale': int(PhotoScan.HigesthAccuracy),
-              'network_distribute': True,
-              'filter_mask': '1',
-              'keypoint_limit': '80000',
-              'tiepoint_limit': '0'},
-             {'name': 'AlignCameras',
-              'network_distribute': True}]
+    
+    if MODE == 'network':
+        tasks = [{'name': 'MatchPhotos',
+                  'downscale': int(PhotoScan.HigesthAccuracy),
+                  'network_distribute': True,
+                  'filter_mask': '1',
+                  'keypoint_limit': '80000',
+                  'tiepoint_limit': '0'},
+                 {'name': 'AlignCameras',
+                  'network_distribute': True}]
+        start_network_batch_process([PhotoScan.app.document.chunk], tasks)
+    else:
+        chunk = PhotoScan.app.document.chunk
+        chunk.matchPhotos(accuracy=PhotoScan.HighAccuracy,
+                          generic_preselection=True,
+                          reference_preselection=False)
+        chunk.alignCameras()
 
-    start_network_batch_process([PhotoScan.app.document.chunk], tasks)
 #
 #
 #
@@ -294,24 +328,30 @@ def setup_merged_optimization():
 # Creates final model and textures
 def create_dense_and_model():
     chunks = []
-
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label == ("Optimized Merged Chunk"):
             chunks.append(chunk)
 
-    tasks = [{'name': 'BuildDenseCloud',
-              'downscale': int(PhotoScan.HighAccuracy),
-              'network_distribute': True},
-             {'name': 'BuildModel',
-              'face_count': 3,
-              'network_distribute': True},
-             {'name': 'BuildUV'},
-             {'name': 'BuildTexture',
-              'texture_count': 1,
-              'texture_size': 4096,
-              'network_distribute': True}]
-
-    start_network_batch_process(chunks, tasks)
+    if MODE == 'network':
+        tasks = [{'name': 'BuildDenseCloud',
+                  'downscale': int(PhotoScan.HighAccuracy),
+                  'network_distribute': True},
+                 {'name': 'BuildModel',
+                  'face_count': 3,
+                  'network_distribute': True},
+                 {'name': 'BuildUV'},
+                 {'name': 'BuildTexture',
+                  'texture_count': 1,
+                  'texture_size': 4096,
+                  'network_distribute': True}]
+        start_network_batch_process(chunks, tasks)
+    else:
+        for chunk in chunks:
+            chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
+            chunk.buildModel(surface=PhotoScan.Arbitrary,
+                             interpolation=PhotoScan.EnabledInterpolation)
+            chunk.buildUV(mapping=PhotoScan.GenericMapping)
+            chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
 
 #
 # Deletes selected points and optimizes with some options.
