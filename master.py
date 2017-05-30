@@ -175,7 +175,7 @@ def perform_chi_optimize():
                 delete_and_optimize_all()
 
 #
-# Optimizes sparse cloud using the CHI-method.
+# Optimizes sparse cloud using the Tony's method.
 # In it's current form, this is blindly performed. There are situations where this will
 # remove too many points. This doesn't seem to work well when using the turntable method.
 def perform_new_optimize():
@@ -225,6 +225,7 @@ def post_optimize_noalign():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             chunks.append(chunk)
+
     if MODE == 'network':
         tasks = [{'name': 'BuildDenseCloud',
                   'downscale': int(PhotoScan.HighAccuracy),
@@ -239,7 +240,7 @@ def post_optimize_noalign():
                   'network_distribute': True}]
         start_network_batch_process(chunks, tasks)
     else:
-        for chunk in cunks:
+        for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
             chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
             chunk.buildUV(mapping=PhotoScan.GenericMapping)
@@ -250,9 +251,11 @@ def post_optimize_noalign():
 # Builds dense cloud, model, texture, creates maks, aligns chunks.
 def post_optimize_n_side():
     chunks = []
+
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             chunks.append(chunk)
+
     if MODE == 'network':
         tasks = [{'name': 'BuildDenseCloud',
                   'downscale': int(PhotoScan.HighAccuracy),
@@ -288,7 +291,7 @@ def post_optimize_n_side():
 #
 # Merge chunks and align masked photos.
 def merged_and_align():
-    
+
     if MODE == 'network':
         tasks = [{'name': 'MatchPhotos',
                   'downscale': int(PhotoScan.HigesthAccuracy),
