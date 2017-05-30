@@ -1,7 +1,7 @@
 import os
 import re
-import PhotoScan
 import math
+import PhotoScan
 
 # Specify folder of unique identifier.
 # Files must be in the following locations:
@@ -25,8 +25,8 @@ IMAGES_FOLDER = 'JPG'
 PROCESS_FOLDER = 'PROCESSING'
 EXPORT_FOLDER = 'EXPORT'
 MODE = 'network'
+# MODE = 'local'
 
-#
 # Handles starting a network batch jobs.
 # Accepts an array of hashes of tasks/parameters.
 def start_network_batch_process(chunks, tasks):
@@ -221,6 +221,7 @@ def post_optimize_noalign():
              {'name': 'BuildModel',
               'face_count': 3,
               'network_distribute': True},
+             {'name': 'BuildUV'},
              {'name': 'BuildTexture',
               'texture_count': 1,
               'texture_size': 4096,
@@ -243,6 +244,7 @@ def post_optimize_n_side():
              {'name': 'BuildModel',
               'face_count': 3,
               'network_distribute': True},
+             {'name': 'BuildUV'},
              {'name': 'BuildTexture',
               'texture_count': 1,
               'texture_size': 4096,
@@ -303,6 +305,7 @@ def create_dense_and_model():
              {'name': 'BuildModel',
               'face_count': 3,
               'network_distribute': True},
+             {'name': 'BuildUV'},
              {'name': 'BuildTexture',
               'texture_count': 1,
               'texture_size': 4096,
