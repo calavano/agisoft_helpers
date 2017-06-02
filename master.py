@@ -26,6 +26,7 @@ PROCESS_FOLDER = 'PROCESSING'
 EXPORT_FOLDER = 'EXPORT'
 MODE = 'network'
 # MODE = 'local'
+TURNTABLE = False
 
 # Handles starting a network batch jobs.
 # Accepts an array of hashes of tasks/parameters.
@@ -150,10 +151,10 @@ def setup_optimize():
             chunk.enabled = False
 
 #
-# Optimizes sparse cloud using the CHI-method.
+# Optimizes sparse cloud an older method.
 # In it's current form, this is blindly performed. There are situations where this will
 # remove too many points. This doesn't seem to work well when using the turntable method.
-def perform_chi_optimize():
+def perform_old_optimize():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             gradual_selection_reconstructionuncertainty_ten()
@@ -203,10 +204,10 @@ def perform_new_optimize():
 # Standard optimization routine.
 # Duplicates initial chunks, adds scale bars, blindly performs the
 # Chi-method of optimization.
-def optimize_chi():
+def optimize_old():
     setup_optimize()
     add_scalebars()
-    perform_chi_optimize()
+    perform_old_optimize()
 
 #
 # New optimization routine.
@@ -588,7 +589,7 @@ def create_roi():
 #
 # Setup Menus
 PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import Images", load_images)
-PhotoScan.app.addMenuItem("Automate/Flipflop/2a. CHI Optimize", optimize_chi)
+PhotoScan.app.addMenuItem("Automate/Flipflop/2a. Old Optimize", optimize_old)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", optimize_new)
 PhotoScan.app.addMenuItem("Automate/Flipflop/3. Model, Mask, Align", post_optimize_n_side)
 PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge Sides and Realign", merged_and_align)
@@ -598,7 +599,7 @@ PhotoScan.app.addMenuItem("Automate/Flipflop/6. Create Dense, Model, and Texture
 PhotoScan.app.addMenuItem("Automate/Flipflop/7. Export Models", export_models)
 
 PhotoScan.app.addMenuItem("Automate/One Side/1. Import Images", load_images)
-PhotoScan.app.addMenuItem("Automate/One Side/2a. CHI Optimize", optimize_chi)
+PhotoScan.app.addMenuItem("Automate/One Side/2a. Old Optimize", optimize_old)
 PhotoScan.app.addMenuItem("Automate/One Side/2b. New Optimize", optimize_new)
 PhotoScan.app.addMenuItem("Automate/One Side/3. Create Dense, Model, and Texture",
                           create_dense_and_model)
