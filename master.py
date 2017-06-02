@@ -69,7 +69,7 @@ def load_images():
             image_list[image_index] = path_photos + '/' + side + '/' + image
 
         chunk = PhotoScan.app.document.addChunk()
-        chunk = 'Aligned Side ' + str(side_index)
+        chunk.label = 'Aligned Side ' + str(side_index + 1)
         chunk.addPhotos(image_list)
 
     # Save file as .psx as it is requried for netwrok processing.
@@ -106,7 +106,7 @@ def load_images():
                               generic_preselection=True,
                               reference_preselection=False)
             chunk.alignCameras()
-            chunk.detectMarkers(type=PhotoScan.HighestAccuracy,
+            chunk.detectMarkers(type=PhotoScan.TargetType.CircularTarget12bit,
                                 tolerance=75,
                                 inverted=False,
                                 noparity=False)
@@ -221,7 +221,6 @@ def optimize_new():
 # Builds dense cloud, model, texture, creates maks, aligns chunks.
 def post_optimize_noalign():
     chunks = []
-
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
             chunks.append(chunk)
@@ -263,11 +262,11 @@ def post_optimize_n_side():
                  {'name': 'BuildModel',
                   'face_count': 3,
                   'network_distribute': True},
-                 {'name': 'BuildUV'},
-                 {'name': 'BuildTexture',
-                  'texture_count': 1,
-                  'texture_size': 4096,
-                  'network_distribute': True},
+                 #{'name': 'BuildUV'},
+                 #{'name': 'BuildTexture',
+                 # 'texture_count': 1,
+                 # 'texture_size': 4096,
+                 # 'network_distribute': True},
                  {'name': 'ImportMasks',
                   'method': 3,
                   'network_distribute': True},
@@ -279,14 +278,15 @@ def post_optimize_n_side():
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
-            chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
-            chunk.buildUV(mapping=PhotoScan.GenericMapping)
-            chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
-            # importMasks(path=’‘, source=MaskSourceAlpha, operation=MaskOperationReplacement,
-            #             tolerance=10[,cameras][, progress])
-            # document.alignChunks(chunks, reference, method=’points’, fix_scale=False,
-            #                      accuracy=HighAccuracy, preselection=False, filter_mask=False,
-            #                      point_limit=40000[, progress])
+            chunk.buildModel(surface=PhotoScan.Arbitrary,
+                             interpolation=PhotoScan.EnabledInterpolation)
+            #chunk.buildUV(mapping=PhotoScan.GenericMapping)
+            #chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
+            chunk.importMasks(path='', source=PhotoScan.MaskSource.MaskSourceModel,
+                              operation=PhotoScan.MaskOperation.MaskOperationReplacement)
+        PhotoScan.app.document.alignChunks(chunks, chunks[0], method='points', fix_scale=False,
+                                           accuracy=PhotoScan.HighAccuracy, preselection=False,
+                                           filter_mask=True, point_limit=80000)
 
 #
 # Merge chunks and align masked photos.
@@ -591,7 +591,7 @@ PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import Images", load_images)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2a. CHI Optimize", optimize_chi)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", optimize_new)
 PhotoScan.app.addMenuItem("Automate/Flipflop/3. Model, Mask, Align", post_optimize_n_side)
-PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge and Align Sides", merged_and_align)
+PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge Sides and Realign", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/5. Optimize Merged", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/6. Create Dense, Model, and Texture",
                           create_dense_and_model)
