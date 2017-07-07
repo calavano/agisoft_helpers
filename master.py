@@ -157,6 +157,9 @@ def setup_optimize():
 def perform_old_optimize():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
+
+            chunk.enabled = True
+
             gradual_selection_reconstructionuncertainty_ten()
             delete_and_optimize()
             gradual_selection_reconstructionuncertainty_ten()
@@ -182,6 +185,9 @@ def perform_old_optimize():
 def perform_new_optimize():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
+
+            chunk.enabled = True
+
             gradual_selection_reconstructionuncertainty()
             delete_and_optimize()
             gradual_selection_reconstructionuncertainty()
