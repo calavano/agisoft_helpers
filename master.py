@@ -53,8 +53,6 @@ def start_network_batch_process(chunks, tasks):
 #
 # Loads images from two 'sides', aligns cameras, and detects markers.
 def load_images():
-    #chunk_list = PhotoScan.app.document.chunks
-
     # This will create N chunks and load the images from SIDEA/SIDEB/SIDEN into each.
     path_druid = PhotoScan.app.getExistingDirectory("Specify DRUID path:")
     path_druid = path_druid.replace('\\', '/')
@@ -150,6 +148,44 @@ def setup_optimize():
             new_chunk.label = chunk.label.replace('Aligned', 'Optimized')
             chunk.enabled = False
 
+def optimize_chunk():
+    gradualselection_reconstructionuncertainty_ten()
+    delete_and_optimize()
+    gradualselection_reconstructionuncertainty_ten()
+    delete_and_optimize()
+
+    var = gradual_selection_reprojectionerror()
+
+    while var >= 1:
+        var = gradual_selection_reprojectionerror()
+        delete_and_optimize()
+
+    if var <= 1.0:
+        PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
+
+    while var >= 0.3:
+        var = gradual_selection_reprojectionerror()
+        delete_and_optimize_all()
+
+def optimize_chunk_new():
+    gradualselection_reconstructionuncertainty()
+    delete_and_optimize()
+    gradualselection_reconstructionuncertainty()
+    delete_and_optimize()
+
+    var = gradual_selection_reprojectionerror()
+
+    while var >= 1:
+        var = gradual_selection_reprojectionerror()
+        delete_and_optimize()
+
+    if var <= 1.0:
+        PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
+
+    while var >= 0.3:
+        var = gradual_selection_reprojectionerror()
+        delete_and_optimize_all()
+
 #
 # Optimizes sparse cloud an older method.
 # In it's current form, this is blindly performed. There are situations where this will
@@ -157,26 +193,8 @@ def setup_optimize():
 def perform_old_optimize():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
-
             chunk.enabled = True
-
-            gradual_selection_reconstructionuncertainty_ten()
-            delete_and_optimize()
-            gradual_selection_reconstructionuncertainty_ten()
-            delete_and_optimize()
-
-            var = gradual_selection_reprojectionerror()
-
-            while var >= 1:
-                var = gradual_selection_reprojectionerror()
-                delete_and_optimize()
-
-            if var <= 1.0:
-                PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
-
-            while var >= 0.3:
-                var = gradual_selection_reprojectionerror()
-                delete_and_optimize_all()
+            optimize_chunk()
 
 #
 # Optimizes sparse cloud using the Tony's method.
@@ -185,26 +203,8 @@ def perform_old_optimize():
 def perform_new_optimize():
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label.startswith("Optimized"):
-
             chunk.enabled = True
-
-            gradual_selection_reconstructionuncertainty()
-            delete_and_optimize()
-            gradual_selection_reconstructionuncertainty()
-            delete_and_optimize()
-
-            var = gradual_selection_reprojectionerror()
-
-            while var >= 1:
-                var = gradual_selection_reprojectionerror()
-                delete_and_optimize()
-
-            if var <= 1.0:
-                PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
-
-            while var >= 0.3:
-                var = gradual_selection_reprojectionerror()
-                delete_and_optimize_all()
+            optimize_chunk_new()
 
 #
 # Standard optimization routine.
@@ -465,7 +465,7 @@ def gradual_selection_reprojectionerror():
 #
 # Performs a gradual selection using 'reconstruction uncertainty'
 # Uses the hard-coded value of '10'
-def gradual_selection_reconstructionuncertainty_ten():
+def gradualselection_reconstructionuncertainty_ten():
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
@@ -474,7 +474,7 @@ def gradual_selection_reconstructionuncertainty_ten():
 #
 # Performs a gradual selection using 'reconstruction uncertainty'
 # Blindly selects 10% of the points.
-def gradual_selection_reconstructionuncertainty():
+def gradualselection_reconstructionuncertainty():
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
@@ -616,10 +616,12 @@ PhotoScan.app.addMenuItem("Reset/Reset View", reset_view)
 
 PhotoScan.app.addMenuItem("Optimize/Cameras/Partial", optimize_partial)
 PhotoScan.app.addMenuItem("Optimize/Cameras/All", optimize_all)
+PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 1", optimize_chunk)
+PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 2", optimize_chunk_new)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10",
-                          gradual_selection_reconstructionuncertainty_ten)
+                          gradualselection_reconstructionuncertainty_ten)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10%",
-                          gradual_selection_reconstructionuncertainty)
+                          gradualselection_reconstructionuncertainty)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reprojection Error",
                           gradual_selection_reprojectionerror)
 
