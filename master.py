@@ -1,4 +1,5 @@
 import os
+import glob
 import re
 import math
 import PhotoScan
@@ -19,23 +20,22 @@ import PhotoScan
 # appropriate times.
 
 DOC = PhotoScan.app.document
-SERVER_IP = '127.0.0.1'
-SHARED_ROOT = 'Z:/'
+SERVER_IP = ''
+SHARED_ROOT = ''
 IMAGES_FOLDER = 'JPG'
 PROCESS_FOLDER = 'PROCESSING'
 EXPORT_FOLDER = 'EXPORT'
 MODE = 'network'
-# MODE = 'local'
 TURNTABLE = False
+VALID_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'tif', 'tiff', 'png', 'bmp', 'exr',
+                          'tga', 'pgm', 'ppm', 'dng', 'mpo', 'seq', 'ara']
 
 # Handles starting a network batch jobs.
 # Accepts an array of hashes of tasks/parameters.
 def start_network_batch_process(chunks, tasks):
-    net_tasks = []
-
+    network_tasks = []
     client = PhotoScan.NetworkClient()
     client.connect(SERVER_IP)
-
     for task_params in tasks:
         new_task = PhotoScan.NetworkTask()
         for chunk in chunks:
@@ -44,28 +44,31 @@ def start_network_batch_process(chunks, tasks):
             for key in task_params:
                 if key != 'name':
                     new_task.params[key] = task_params[key]
-        net_tasks.append(new_task)
-
+        network_tasks.append(new_task)
     network_save = PhotoScan.app.document.path.replace(SHARED_ROOT, '')
-    batch_id = client.createBatch(network_save, net_tasks)
+    batch_id = client.createBatch(network_save, network_tasks)
     client.resumeBatch(batch_id)
 
 #
 # Loads images from two 'sides', aligns cameras, and detects markers.
+# This will create N chunks and load the images from SIDEA/SIDEB/SIDEN into each.
 def load_images():
-    # This will create N chunks and load the images from SIDEA/SIDEB/SIDEN into each.
     path_druid = PhotoScan.app.getExistingDirectory("Specify DRUID path:")
     path_druid = path_druid.replace('\\', '/')
-
     druid = path_druid.split('/')[-1]
+    path_photos = path_druid + '/' + IMAGES_FOLDER
 
-    path_photos = path_druid + '/' + IMAGES_FOLDER + '/'
+    folder_list = []
+    for folder in os.listdir(path_photos):
+        if os.path.isdir(os.path.join(path_photos, folder)):
+            folder_list.append(folder)
 
-    folders = os.listdir(path_photos)
-    for side_index, side in enumerate(folders):
-        image_list = os.listdir(path_photos + '/' + side)
-        for image_index, image in enumerate(image_list):
-            image_list[image_index] = path_photos + '/' + side + '/' + image
+    for side_index, side in enumerate(folder_list):
+        image_list = []
+        for image in os.listdir(path_photos + '/' + side):
+            extension = image.split('.')[-1].lower()
+            if extension in VALID_IMAGE_EXTENSIONS and not image.startswith('._'):
+                image_list.append(path_photos + '/' + side + '/' + image)
 
         chunk = PhotoScan.app.document.addChunk()
         chunk.label = 'Aligned Side ' + str(side_index + 1)
@@ -597,7 +600,7 @@ def create_roi():
 PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import Images", load_images)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2a. Old Optimize", optimize_old)
 PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", optimize_new)
-PhotoScan.app.addMenuItem("Automate/Flipflop/3. Model, Mask, Align", post_optimize_n_side)
+PhotoScan.app.addMenuItem("Automate/Flipflop/3. Create Dense, Model, Mask, Align", post_optimize_n_side)
 PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge Sides and Realign", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/5. Optimize Merged", merged_and_align)
 PhotoScan.app.addMenuItem("Automate/Flipflop/6. Create Dense, Model, and Texture",
