@@ -1,5 +1,7 @@
+"""
+Attempts to automate tasks in Agisoft Photoscan
+"""
 import os
-import glob
 import re
 import math
 import PhotoScan
@@ -29,79 +31,103 @@ MODE = 'network'
 TURNTABLE = False
 VALID_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'tif', 'tiff', 'png', 'bmp', 'exr',
                           'tga', 'pgm', 'ppm', 'dng', 'mpo', 'seq', 'ara']
+UID_FOLDER = ''
 
-# Handles starting a network batch jobs.
-# Accepts an array of hashes of tasks/parameters.
-def start_network_batch_process(chunks, tasks):
+def set_uid_folder():
+    """Adds UID_FOLDER to global var."""
+    global UID_FOLDER
+    uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
+    uid_folder = uid_folder.replace('\\', '/')
+    UID_FOLDER = uid_folder
+
+def queue_network_tasks(chunks, tasks):
+    """Adds network tasks to queue."""
+    # Force save before creating network task
+    PhotoScan.app.document.save()
     network_tasks = []
-    client = PhotoScan.NetworkClient()
-    client.connect(SERVER_IP)
-    for task_params in tasks:
-        new_task = PhotoScan.NetworkTask()
+    network_client = PhotoScan.NetworkClient()
+    network_client.connect(SERVER_IP)
+    for task_parameters in tasks:
+        new_network_task = PhotoScan.NetworkTask()
         for chunk in chunks:
-            new_task.frames.append((chunk.key, 0))
-            new_task.name = task_params['name']
-            for key in task_params:
+            new_network_task.frames.append((chunk.key, 0))
+            new_network_task.name = task_parameters['name']
+            for key in task_parameters:
                 if key != 'name':
-                    new_task.params[key] = task_params[key]
-        network_tasks.append(new_task)
+                    new_network_task.params[key] = task_parameters[key]
+        network_tasks.append(new_network_task)
     network_save = PhotoScan.app.document.path.replace(SHARED_ROOT, '')
-    batch_id = client.createBatch(network_save, network_tasks)
-    client.resumeBatch(batch_id)
+    batch_id = network_client.createBatch(network_save, network_tasks)
+    network_client.resumeBatch(batch_id)
 
-#
-# Loads images from two 'sides', aligns cameras, and detects markers.
-# This will create N chunks and load the images from SIDEA/SIDEB/SIDEN into each.
-def load_images():
-    path_druid = PhotoScan.app.getExistingDirectory("Specify DRUID path:")
-    path_druid = path_druid.replace('\\', '/')
-    druid = path_druid.split('/')[-1]
-    path_photos = path_druid + '/' + IMAGES_FOLDER
+def add_images_to_workspace_nside():
+    """ Adds images to workspace. Will put arbitrary number of sides into their own chunks.
 
+    Will look for IMAGES_FOLDER in selected folder and create an "Auto: Aligned Side #" chunk
+    for all sub-folders.
+    """
+    global UID_FOLDER
+    if not UID_FOLDER:
+        uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
+        uid_folder = uid_folder.replace('\\', '/')
+        UID_FOLDER = uid_folder
+    else:
+        uid_folder = UID_FOLDER
+    path_photos = uid_folder + '/' + IMAGES_FOLDER
     folder_list = []
     for folder in os.listdir(path_photos):
         if os.path.isdir(os.path.join(path_photos, folder)):
             folder_list.append(folder)
-
     for side_index, side in enumerate(folder_list):
         image_list = []
         for image in os.listdir(path_photos + '/' + side):
             extension = image.split('.')[-1].lower()
             if extension in VALID_IMAGE_EXTENSIONS and not image.startswith('._'):
                 image_list.append(path_photos + '/' + side + '/' + image)
-
         chunk = PhotoScan.app.document.addChunk()
-        chunk.label = 'Aligned Side ' + str(side_index + 1)
+        chunk.label = 'Auto: Aligned Side ' + str(side_index + 1)
         chunk.addPhotos(image_list)
 
-    # Save file as .psx as it is requried for netwrok processing.
-    save_path = path_druid + '/' + PROCESS_FOLDER + '/'
-    save_file = save_path + druid + '.psx'
+def save_workspace():
+    """Save workspace as a .psx.
 
+    .psx is used instead of .psz to make use of network processing.
+    """
+    global UID_FOLDER
+    if not UID_FOLDER:
+        uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
+        uid_folder = uid_folder.replace('\\', '/')
+        UID_FOLDER = uid_folder
+    else:
+        uid_folder = UID_FOLDER
+    uid = uid_folder.split('/')[-1]
+    save_path = uid_folder + '/' + PROCESS_FOLDER + '/'
+    save_file = save_path + uid + '.psx'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-
-    # if not PhotoScan.app.document.save(save_file):
-    #     PhotoScan.app.messageBox("Can’t save project")
     PhotoScan.app.document.save(save_file)
 
+def auto_phase_one():
+    """Automatic Step 1: Attempts to align all photos."""
+    add_images_to_workspace_nside()
+    save_workspace()
     chunks = []
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Aligned"):
+        if chunk.label.startswith("Auto: Aligned"):
             chunks.append(chunk)
 
     if MODE == 'network':
         tasks = [{'name': 'MatchPhotos',
                   'downscale': int(PhotoScan.HighestAccuracy),
                   'network_distribute': True,
-                  'keypoint_limit': '80000',
+                  'keypoint_limit': '50000',
                   'tiepoint_limit': '0'},
                  {'name': 'AlignCameras',
                   'network_distribute': True},
                  {'name': 'DetectMarkers',
                   'tolerance': '75',
                   'network_distribute': True}]
-        start_network_batch_process(chunks, tasks)
+        queue_network_tasks(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.matchPhotos(accuracy=PhotoScan.HighestAccuracy,
@@ -113,128 +139,101 @@ def load_images():
                                 inverted=False,
                                 noparity=False)
 
-#
-# Add scale bars.
-# Uses encoded markers and known values in meters.
-def add_scalebars():
-    accuracy = 0.0001
+def auto_setup_optimize():
+    """Creates copies of Alignment chunks for future optimization."""
+    for chunk in PhotoScan.app.document.chunks:
+        if chunk.label.startswith('Auto: Aligned'):
+            new_chunk = chunk.copy()
+            new_chunk.label = chunk.label.replace('Aligned', 'Unoptimized')
+            chunk.enabled = False
 
+def auto_optimize_sparse_clouds():
+    """Optimizes sparse cloud using specified method."""
+    for chunk in PhotoScan.app.document.chunks:
+        if chunk.label.startswith("Auto: Unoptimized"):
+            PhotoScan.app.document.chunk = chunk
+            optimize_sparse_cloud()
+            chunk.label = chunk.label.replace('Unoptimized', 'Optimized')
+
+def auto_optimize_sparse_clouds_new():
+    """Optimizes sparse cloud using specified method."""
+    for chunk in PhotoScan.app.document.chunks:
+        if chunk.label.startswith("Auto: Unoptimized"):
+            PhotoScan.app.document.chunk = chunk
+            optimize_sparse_cloud_new()
+            chunk.label = chunk.label.replace('Unoptimized', 'Optimized')
+
+def auto_setup_and_optimize():
+    """Sets up optimization, then performs old optimziation method."""
+    auto_setup_optimize()
+    auto_optimize_sparse_clouds()
+    add_scalebars_to_chunk()
+
+def auto_setup_and_optimize_new():
+    """Sets up optimization, then performs new optimziation method."""
+    auto_setup_optimize()
+    auto_optimize_sparse_clouds_new()
+    add_scalebars_to_chunk()
+
+def add_scalebars_to_chunk():
+    """Adds scalebars to chunk according to hard-coded measurements for encoded markers."""
+    accuracy = 0.0001
     pairings = ['1_3', '2_4', '49_50', '50_51', '52_53', '53_54',
                 '55_56', '57_58', '58_59', '60_61', '61_62', '63_64']
-
     scale_values = {'49_50': 0.50024, '50_51': 0.50058, '52_53': 0.25007, '53_54': 0.25034,
                     '55_56': 0.25033, '57_58': 0.50027, '58_59': 0.50053, '60_61': 0.25004,
                     '61_62': 0.25033, '63_64': 0.25034, '1_3': 0.12500, '2_4': 0.12500}
+    chunk = PhotoScan.app.document.chunk
+    markers = {}
+    for marker in chunk.markers:
+        markers.update({marker.label.replace('target ', ''): marker})
+    scalebars = {}
+    for pair in pairings:
+        left, right = pair.split('_')
+        if left in markers.keys():
+            scalebars[pair] = chunk.addScalebar(markers[left], markers[right])
+            scalebars[pair].label = pair
+            scalebars[pair].reference.accuracy = accuracy
+            scalebars[pair].reference.distance = scale_values[pair]
 
-    for chunk in PhotoScan.app.document.chunks:
-        markers = {}
-        for marker in chunk.markers:
-            markers.update({marker.label.replace('target ', ''): marker})
-
-        scalebars = {}
-        for pair in pairings:
-            left, right = pair.split('_')
-            if left in markers.keys():
-                scalebars[pair] = chunk.addScalebar(markers[left], markers[right])
-                scalebars[pair].label = pair
-                scalebars[pair].reference.accuracy = accuracy
-                scalebars[pair].reference.distance = scale_values[pair]
-
-#
-# Creates duplicates of the 'alignment chunks'.
-# This allows you to mess up the optimization of the 'alignment chunks'
-# without worrying about needing to perform a new alignment.
-def setup_optimize():
-    for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith('Aligned'):
-            new_chunk = chunk.copy()
-            new_chunk.label = chunk.label.replace('Aligned', 'Optimized')
-            chunk.enabled = False
-
-def optimize_chunk():
-    gradualselection_reconstructionuncertainty_ten()
+def optimize_sparse_cloud():
+    """Optimizes sparse cloud"""
+    reconstructionuncertainty_ten()
     delete_and_optimize()
-    gradualselection_reconstructionuncertainty_ten()
+    reconstructionuncertainty_ten()
     delete_and_optimize()
-
-    var = gradual_selection_reprojectionerror()
-
+    var = reprojectionerror()
     while var >= 1:
-        var = gradual_selection_reprojectionerror()
+        var = reprojectionerror()
         delete_and_optimize()
-
     if var <= 1.0:
         PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
-
     while var >= 0.3:
-        var = gradual_selection_reprojectionerror()
+        var = reprojectionerror()
         delete_and_optimize_all()
 
-def optimize_chunk_new():
-    gradualselection_reconstructionuncertainty()
+def optimize_sparse_cloud_new():
+    """Optimizes sparse cloud"""
+    reconstructionuncertainty()
     delete_and_optimize()
-    gradualselection_reconstructionuncertainty()
+    reconstructionuncertainty()
     delete_and_optimize()
-
-    var = gradual_selection_reprojectionerror()
-
+    var = reprojectionerror()
     while var >= 1:
-        var = gradual_selection_reprojectionerror()
+        var = reprojectionerror()
         delete_and_optimize()
-
     if var <= 1.0:
         PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
-
     while var >= 0.3:
-        var = gradual_selection_reprojectionerror()
+        var = reprojectionerror()
         delete_and_optimize_all()
 
-#
-# Optimizes sparse cloud an older method.
-# In it's current form, this is blindly performed. There are situations where this will
-# remove too many points. This doesn't seem to work well when using the turntable method.
-def perform_old_optimize():
-    for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Optimized"):
-            chunk.enabled = True
-            optimize_chunk()
-
-#
-# Optimizes sparse cloud using the Tony's method.
-# In it's current form, this is blindly performed. There are situations where this will
-# remove too many points. This doesn't seem to work well when using the turntable method.
-def perform_new_optimize():
-    for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Optimized"):
-            chunk.enabled = True
-            optimize_chunk_new()
-
-#
-# Standard optimization routine.
-# Duplicates initial chunks, adds scale bars, blindly performs the
-# Chi-method of optimization.
-def optimize_old():
-    setup_optimize()
-    add_scalebars()
-    perform_old_optimize()
-
-#
-# New optimization routine.
-# Duplicates initial chunks, adds scale bars, blindly performs the
-# Tony's method of optimization.
-def optimize_new():
-    setup_optimize()
-    add_scalebars()
-    perform_new_optimize()
-
-#
-# Builds dense cloud, model, texture, creates maks, aligns chunks.
-def post_optimize_noalign():
+def auto_phase_two_noalign():
+    """Build dense cloud, model, and texture."""
     chunks = []
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Optimized"):
+        if chunk.label.startswith("Auto: Optimized"):
             chunks.append(chunk)
-
     if MODE == 'network':
         tasks = [{'name': 'BuildDenseCloud',
                   'downscale': int(PhotoScan.HighAccuracy),
@@ -247,24 +246,22 @@ def post_optimize_noalign():
                   'texture_count': 1,
                   'texture_size': 4096,
                   'network_distribute': True}]
-        start_network_batch_process(chunks, tasks)
+        queue_network_tasks(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
-            chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
+            chunk.buildModel(surface=PhotoScan.Arbitrary,
+                             interpolation=PhotoScan.EnabledInterpolation)
             chunk.buildUV(mapping=PhotoScan.GenericMapping)
             chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
 
-
-#
-# Builds dense cloud, model, texture, creates maks, aligns chunks.
-def post_optimize_n_side():
+# TODO: Need to fix. Network job failing at BuildDenseCloud.
+def auto_phase_two_nside():
+    """Build dense cloud, model, create mask from model, align chunks."""
     chunks = []
-
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Optimized"):
+        if chunk.label.startswith("Auto: Optimized"):
             chunks.append(chunk)
-
     if MODE == 'network':
         tasks = [{'name': 'BuildDenseCloud',
                   'downscale': int(PhotoScan.HighAccuracy),
@@ -272,11 +269,6 @@ def post_optimize_n_side():
                  {'name': 'BuildModel',
                   'face_count': 3,
                   'network_distribute': True},
-                 #{'name': 'BuildUV'},
-                 #{'name': 'BuildTexture',
-                 # 'texture_count': 1,
-                 # 'texture_size': 4096,
-                 # 'network_distribute': True},
                  {'name': 'ImportMasks',
                   'method': 3,
                   'network_distribute': True},
@@ -284,7 +276,7 @@ def post_optimize_n_side():
                   'match_filter_mask': 1,
                   'match_point_limit': 80000,
                   'network_distribute': True}]
-        start_network_batch_process(chunks, tasks)
+        queue_network_tasks(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
@@ -298,10 +290,8 @@ def post_optimize_n_side():
                                            accuracy=PhotoScan.HighAccuracy, preselection=False,
                                            filter_mask=True, point_limit=80000)
 
-#
-# Merge chunks and align masked photos.
-def merged_and_align():
-
+def auto_phase_three():
+    """Merge chunks and align masked photos."""
     if MODE == 'network':
         tasks = [{'name': 'MatchPhotos',
                   'downscale': int(PhotoScan.HigesthAccuracy),
@@ -311,7 +301,7 @@ def merged_and_align():
                   'tiepoint_limit': '0'},
                  {'name': 'AlignCameras',
                   'network_distribute': True}]
-        start_network_batch_process([PhotoScan.app.document.chunk], tasks)
+        queue_network_tasks([PhotoScan.app.document.chunk], tasks)
     else:
         chunk = PhotoScan.app.document.chunk
         chunk.matchPhotos(accuracy=PhotoScan.HighAccuracy,
@@ -319,32 +309,25 @@ def merged_and_align():
                           reference_preselection=False)
         chunk.alignCameras()
 
-#
-#
-#
-def optimize_merged_sides():
-    setup_merged_optimization()
-
-#
-# Creates duplicate of the 'merged alignment chunk'.
-# This allows you to mess up the optimization of the merged chunk
-# without worrying about needing to perform a new alignment.
-#
-def setup_merged_optimization():
+def auto_setup_merged_optimization():
+    """Creates duplicate of the 'merged alignment chunk' for future optimization."""
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label == "Merged Chunk":
+        if chunk.label == "Auto: Merged Chunk":
             chunk_om = chunk.copy()
-            chunk_om.label = "Optimized Merged Chunk"
+            chunk_om.label = "Auto: Unoptimized Merged Chunk"
             chunk.enabled = False
 
-#
-# Creates final model and textures
-def create_dense_and_model():
+def auto_optimize_merged_sides():
+    """Perform all steps needed for optimizing merged sides."""
+    auto_setup_merged_optimization()
+    auto_optimize_sparse_clouds()
+
+def auto_phase_four():
+    """Build dense cloud, model, texture for merged chunk."""
     chunks = []
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label == ("Optimized Merged Chunk"):
+        if chunk.label == ("Auto: Optimized Merged Chunk"):
             chunks.append(chunk)
-
     if MODE == 'network':
         tasks = [{'name': 'BuildDenseCloud',
                   'downscale': int(PhotoScan.HighAccuracy),
@@ -357,7 +340,7 @@ def create_dense_and_model():
                   'texture_count': 1,
                   'texture_size': 4096,
                   'network_distribute': True}]
-        start_network_batch_process(chunks, tasks)
+        queue_network_tasks(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
@@ -366,22 +349,25 @@ def create_dense_and_model():
             chunk.buildUV(mapping=PhotoScan.GenericMapping)
             chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
 
-#
-# Deletes selected points and optimizes with some options.
 def delete_and_optimize():
+    """Deletes selected points and optimizes with some options."""
     delete_selected_points()
     optimize_partial()
 
-#
-# Deletes selected points and optimizes with all options.
 def delete_and_optimize_all():
+    """Deletes selected points and optimizes with some options."""
     delete_selected_points()
     optimize_all()
 
 def rescale(val, in_array, out_array):
-    return min(out_array) + (val - min(in_array)) * ((max(out_array) - min(out_array)) / (max(in_array) - min(in_array)))
+    """Rescale array of values to arbitrary scale"""
+    return min(out_array) \
+           + (val - min(in_array)) \
+           * ((max(out_array) - min(out_array)) \
+           / (max(in_array) - min(in_array)))
 
-def find_nearest(array,value):
+def find_nearest(array, value):
+    """I forget why I created this."""
     diff = 91
     idx = 0
     for index in array:
@@ -391,21 +377,16 @@ def find_nearest(array,value):
             idx = index
     return array.index(idx)
 
-#
-# Performs a gradual selection using 'reprojection error'
-# Blindly selects 10% of the points.
-def ramp_gradual_selection_reprojectionerror():
+def ramp_reprojection():
+    """Performs a gradual selection using 'reprojection error' with ramp method."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
-
     points = PhotoScan.app.document.chunk.point_cloud.points.__len__()
     thresh = 1
     thresh_jump = 1
     selected = points
-
     curve = []
-
     while selected > 50000:
         selected = 0
         point_cloud_filter.selectPoints(thresh)
@@ -414,7 +395,6 @@ def ramp_gradual_selection_reprojectionerror():
                 selected += 1
         thresh += thresh_jump
         curve.append(selected)
-
     angles = []
     for index in range(0, len(curve)-2):
         (distx, disty) = 1.0, abs(rescale(curve[index], curve, range(0, len(curve)-1)))
@@ -422,27 +402,21 @@ def ramp_gradual_selection_reprojectionerror():
         angle *= 180/math.pi
         angles.append(angle)
     elbow = find_nearest(angles, 45)
-
     return elbow
 
-#
-# Performs a gradual selection using 'reprojection error'
-# Blindly selects 10% of the points.
-def gradual_selection_reprojectionerror():
+def reprojectionerror():
+    """Performs a gradual selection using 'reprojection error'."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReprojectionError)
-
     target_percent = 10
     points = PhotoScan.app.document.chunk.point_cloud.points.__len__()
     target = int(points / target_percent)
     thresh = 1
     thresh_jump = 1
     selected = points
-
     high = False
     low = False
-
     while selected != target:
         selected = 0
         point_cloud_filter.selectPoints(thresh)
@@ -457,41 +431,32 @@ def gradual_selection_reprojectionerror():
         else:
             low = True
             thresh -= thresh_jump
-
         if high & low:
             high = False
             low = False
             thresh_jump = thresh_jump / 10
-
     return thresh
 
-#
-# Performs a gradual selection using 'reconstruction uncertainty'
-# Uses the hard-coded value of '10'
-def gradualselection_reconstructionuncertainty_ten():
+def reconstructionuncertainty_ten():
+    """Performs a gradual selection using 'reconstruction uncertainty' with 10."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
     point_cloud_filter.selectPoints(10)
 
-#
-# Performs a gradual selection using 'reconstruction uncertainty'
-# Blindly selects 10% of the points.
-def gradualselection_reconstructionuncertainty():
+def reconstructionuncertainty():
+    """Performs a gradual selection using 'reconstruction uncertainty' with 10%."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
-
     target_percent = 10
     points = PhotoScan.app.document.chunk.point_cloud.points.__len__()
     target = int(points / target_percent)
     thresh = 100
     thresh_jump = 100
     selected = points
-
     high = False
     low = False
-
     while selected != target:
         selected = 0
         point_cloud_filter.selectPoints(thresh)
@@ -510,14 +475,13 @@ def gradualselection_reconstructionuncertainty():
             high = False
             low = False
             thresh_jump = thresh_jump / 10
-#
-# Deletes selected points
+
 def delete_selected_points():
+    """Deletes selected points"""
     PhotoScan.app.document.chunk.point_cloud.removeSelectedPoints()
 
-#
-# Exports a PLY and OBJ
 def export_models():
+    """Exports a PLY and OBJ"""
     path = re.sub(r"PROCESSING/.*", '', PhotoScan.app.document.path)
     export = path + EXPORT_FOLDER
     ply = export + '/PLY/test.ply'
@@ -537,45 +501,36 @@ def export_models():
 #                 fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_p3=False,
 #                 fit_p4=False, fit_shutter=False[, progress])
 
-#
-# Optimizes some of the options
-# Selections according to the CHI-method
 def optimize_partial():
+    """Optimizes some of the options, Selections according to the CHI-method"""
     PhotoScan.app.document.chunk.optimizeCameras(True, True, True, True, True, True, True,
                                                  True, False, True, True, False, False, False)
 
-#
-# Optimizes all of the options.
 def optimize_all():
+    """Optimizes all of the options, Selections according to the CHI-method"""
     PhotoScan.app.document.chunk.optimizeCameras(True, True, True, True, True, True, True,
                                                  True, True, True, True, True, True, False)
 
-#
-# Deletes all chunks other than Algined Side A and B.
-# Assumes you did not the 'aligned' sides.
-# WARNING: This immediately deletes all other chunks.
 def revert_to_clean():
+    """Deletes all chunks other than Algined Side A and B."""
     for chunk in PhotoScan.app.document.chunks:
-        if chunk.label.startswith("Aligned"):
+        if chunk.label.startswith("Auto: Aligned"):
             chunk.enabled = True
         else:
             PhotoScan.app.document.remove(chunk)
 
-#
-# Moves viewport to face the center of the ROI box.
-# This doesn't seem to always work.
 def reset_view():
+    """Moves viewport to face the center of the ROI box; this doesn't seem to always work."""
     PhotoScan.app.viewpoint.coo = PhotoScan.app.document.chunk.region.center
     PhotoScan.app.viewpoint.rot = PhotoScan.app.document.chunk.region.rot
     PhotoScan.app.viewpoint.mag = 100
 
-#
-# Attempts to create the region ROI. This places the center of the ROI region
-# at the midpoint of all of the scale bar markers.
-# NOTE: This doesn't actually do anything yet.
-def create_roi():
-    x_axis, y_axis, z_axis = 0, 0, 0
 
+def create_roi():
+    """ Attempts to create the region ROI. This places the center of the ROI region """
+    # """at the midpoint of all of the scale bar markers. """
+    # """NOTE: This doesn't actually do anything yet."""
+    x_axis, y_axis, z_axis = 0, 0, 0
     for chunk in PhotoScan.app.document.chunks:
         if chunk.label == 'Aligned Side A':
             x_axis, y_axis, z_axis = 0, 0, 0
@@ -595,23 +550,44 @@ def create_roi():
             newregion.center = PhotoScan.Vector([cent_x, cent_y, cent_z])
             chunk.region = newregion
 
+def center_bbox_xyz():
+    """Centers bounding box to XYZ center."""
+    chunk = PhotoScan.app.document.chunk
+    transform_matrix = chunk.transform.matrix
+    if chunk.crs:
+        vect_tm = transform_matrix * PhotoScan.Vector([0, 0, 0, 1])
+        vect_tm.size = 3
+        locfrm = chunk.crs.localframe(vect_tm)
+    else:
+        locfrm = PhotoScan.Matrix().diag([1, 1, 1, 1])
+    locfrm = locfrm * transform_matrix
+    sqrt = math.sqrt(locfrm[0, 0]**2 + locfrm[0, 1]**2 + locfrm[0, 2]**2)
+    mat = PhotoScan.Matrix([[locfrm[0, 0], locfrm[0, 1], locfrm[0, 2]],
+                            [locfrm[1, 0], locfrm[1, 1], locfrm[1, 2]],
+                            [locfrm[2, 0], locfrm[2, 1], locfrm[2, 2]]])
+    mat = mat * (1. / sqrt)
+    reg = chunk.region
+    reg.rot = mat.t()
+    chunk.region = reg
+
 #
 # Setup Menus
-PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import Images", load_images)
-PhotoScan.app.addMenuItem("Automate/Flipflop/2a. Old Optimize", optimize_old)
-PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", optimize_new)
-PhotoScan.app.addMenuItem("Automate/Flipflop/3. Create Dense, Model, Mask, Align", post_optimize_n_side)
-PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge Sides and Realign", merged_and_align)
-PhotoScan.app.addMenuItem("Automate/Flipflop/5. Optimize Merged", merged_and_align)
+PhotoScan.app.addMenuItem("Automate/Flipflop/1. Import and Align", auto_phase_one)
+PhotoScan.app.addMenuItem("Automate/Flipflop/2a. Old Optimize", auto_setup_and_optimize)
+PhotoScan.app.addMenuItem("Automate/Flipflop/2b. New Optimize", auto_setup_and_optimize_new)
+PhotoScan.app.addMenuItem("Automate/Flipflop/3. Create Dense, Model, Mask, Align",
+                          auto_phase_two_nside)
+PhotoScan.app.addMenuItem("Automate/Flipflop/4. Merge Sides and Realign", auto_phase_three)
+PhotoScan.app.addMenuItem("Automate/Flipflop/5. Optimize Merged", auto_optimize_merged_sides)
 PhotoScan.app.addMenuItem("Automate/Flipflop/6. Create Dense, Model, and Texture",
-                          create_dense_and_model)
+                          auto_phase_four)
 PhotoScan.app.addMenuItem("Automate/Flipflop/7. Export Models", export_models)
 
-PhotoScan.app.addMenuItem("Automate/One Side/1. Import Images", load_images)
-PhotoScan.app.addMenuItem("Automate/One Side/2a. Old Optimize", optimize_old)
-PhotoScan.app.addMenuItem("Automate/One Side/2b. New Optimize", optimize_new)
+PhotoScan.app.addMenuItem("Automate/One Side/1. Import and Align", auto_phase_one)
+PhotoScan.app.addMenuItem("Automate/One Side/2a. Old Optimize", auto_setup_and_optimize)
+PhotoScan.app.addMenuItem("Automate/One Side/2b. New Optimize", auto_setup_and_optimize_new)
 PhotoScan.app.addMenuItem("Automate/One Side/3. Create Dense, Model, and Texture",
-                          create_dense_and_model)
+                          auto_phase_two_noalign)
 PhotoScan.app.addMenuItem("Automate/One Side/4. Export Models", export_models)
 
 PhotoScan.app.addMenuItem("Reset/Back to Align", revert_to_clean)
@@ -619,14 +595,16 @@ PhotoScan.app.addMenuItem("Reset/Reset View", reset_view)
 
 PhotoScan.app.addMenuItem("Optimize/Cameras/Partial", optimize_partial)
 PhotoScan.app.addMenuItem("Optimize/Cameras/All", optimize_all)
-PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 1", optimize_chunk)
-PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 2", optimize_chunk_new)
+PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 1", optimize_sparse_cloud)
+PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 2", optimize_sparse_cloud_new)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10",
-                          gradualselection_reconstructionuncertainty_ten)
+                          reconstructionuncertainty_ten)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10%",
-                          gradualselection_reconstructionuncertainty)
+                          reconstructionuncertainty)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reprojection Error",
-                          gradual_selection_reprojectionerror)
+                          reprojectionerror)
 
-PhotoScan.app.addMenuItem("Parts/Add Scale Bars", add_scalebars)
-
+PhotoScan.app.addMenuItem("Parts/Add Scale Bars", add_scalebars_to_chunk)
+PhotoScan.app.addMenuItem("Parts/Set UID_FOLDER", set_uid_folder)
+PhotoScan.app.addMenuItem("Parts/Add Images to Workspace", add_images_to_workspace_nside)
+PhotoScan.app.addMenuItem("Parts/Add Optimization Chunks", auto_setup_optimize)
