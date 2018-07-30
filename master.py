@@ -1,6 +1,3 @@
-"""
-Attempts to automate tasks in Agisoft Photoscan
-"""
 import os
 import re
 import math
@@ -33,17 +30,9 @@ VALID_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'tif', 'tiff', 'png', 'bmp', 'exr',
                           'tga', 'pgm', 'ppm', 'dng', 'mpo', 'seq', 'ara']
 UID_FOLDER = ''
 
-def set_uid_folder():
-    """Adds UID_FOLDER to global var."""
-    global UID_FOLDER
-    uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
-    uid_folder = uid_folder.replace('\\', '/')
-    UID_FOLDER = uid_folder
 
-def queue_network_tasks(chunks, tasks):
+def add_network_tasks_to_queue(chunks, tasks):
     """Adds network tasks to queue."""
-    # Force save before creating network task
-    PhotoScan.app.document.save()
     network_tasks = []
     network_client = PhotoScan.NetworkClient()
     network_client.connect(SERVER_IP)
@@ -61,18 +50,9 @@ def queue_network_tasks(chunks, tasks):
     network_client.resumeBatch(batch_id)
 
 def add_images_to_workspace_nside():
-    """ Adds images to workspace. Will put arbitrary number of sides into their own chunks.
-
-    Will look for IMAGES_FOLDER in selected folder and create an "Auto: Aligned Side #" chunk
-    for all sub-folders.
-    """
-    global UID_FOLDER
-    if not UID_FOLDER:
-        uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
-        uid_folder = uid_folder.replace('\\', '/')
-        UID_FOLDER = uid_folder
-    else:
-        uid_folder = UID_FOLDER
+    """ Adds images to workspace. Will put arbitrary number of sides into their own chunks. """
+    uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
+    uid_folder = uid_folder.replace('\\', '/')
     path_photos = uid_folder + '/' + IMAGES_FOLDER
     folder_list = []
     for folder in os.listdir(path_photos):
@@ -89,17 +69,9 @@ def add_images_to_workspace_nside():
         chunk.addPhotos(image_list)
 
 def save_workspace():
-    """Save workspace as a .psx.
-
-    .psx is used instead of .psz to make use of network processing.
-    """
-    global UID_FOLDER
-    if not UID_FOLDER:
-        uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
-        uid_folder = uid_folder.replace('\\', '/')
-        UID_FOLDER = uid_folder
-    else:
-        uid_folder = UID_FOLDER
+    """Save file as .psx as it is requried for netwrok processing."""
+    uid_folder = PhotoScan.app.getExistingDirectory("Specify uid path:")
+    uid_folder = uid_folder.replace('\\', '/')
     uid = uid_folder.split('/')[-1]
     save_path = uid_folder + '/' + PROCESS_FOLDER + '/'
     save_file = save_path + uid + '.psx'
@@ -120,14 +92,14 @@ def auto_phase_one():
         tasks = [{'name': 'MatchPhotos',
                   'downscale': int(PhotoScan.HighestAccuracy),
                   'network_distribute': True,
-                  'keypoint_limit': '50000',
+                  'keypoint_limit': '80000',
                   'tiepoint_limit': '0'},
                  {'name': 'AlignCameras',
                   'network_distribute': True},
                  {'name': 'DetectMarkers',
                   'tolerance': '75',
                   'network_distribute': True}]
-        queue_network_tasks(chunks, tasks)
+        add_network_tasks_to_queue(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.matchPhotos(accuracy=PhotoScan.HighestAccuracy,
@@ -198,34 +170,34 @@ def add_scalebars_to_chunk():
 
 def optimize_sparse_cloud():
     """Optimizes sparse cloud"""
-    reconstructionuncertainty_ten()
+    gradualselection_reconstructionuncertainty_ten()
     delete_and_optimize()
-    reconstructionuncertainty_ten()
+    gradualselection_reconstructionuncertainty_ten()
     delete_and_optimize()
-    var = reprojectionerror()
+    var = gradual_selection_reprojectionerror()
     while var >= 1:
-        var = reprojectionerror()
+        var = gradual_selection_reprojectionerror()
         delete_and_optimize()
     if var <= 1.0:
         PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
     while var >= 0.3:
-        var = reprojectionerror()
+        var = gradual_selection_reprojectionerror()
         delete_and_optimize_all()
 
 def optimize_sparse_cloud_new():
     """Optimizes sparse cloud"""
-    reconstructionuncertainty()
+    gradualselection_reconstructionuncertainty()
     delete_and_optimize()
-    reconstructionuncertainty()
+    gradualselection_reconstructionuncertainty()
     delete_and_optimize()
-    var = reprojectionerror()
+    var = gradual_selection_reprojectionerror()
     while var >= 1:
-        var = reprojectionerror()
+        var = gradual_selection_reprojectionerror()
         delete_and_optimize()
     if var <= 1.0:
         PhotoScan.app.document.chunk.tiepoint_accuracy = 0.1
     while var >= 0.3:
-        var = reprojectionerror()
+        var = gradual_selection_reprojectionerror()
         delete_and_optimize_all()
 
 def auto_phase_two_noalign():
@@ -246,16 +218,14 @@ def auto_phase_two_noalign():
                   'texture_count': 1,
                   'texture_size': 4096,
                   'network_distribute': True}]
-        queue_network_tasks(chunks, tasks)
+        add_network_tasks_to_queue(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
-            chunk.buildModel(surface=PhotoScan.Arbitrary,
-                             interpolation=PhotoScan.EnabledInterpolation)
+            chunk.buildModel(surface=PhotoScan.Arbitrary, interpolation=PhotoScan.EnabledInterpolation)
             chunk.buildUV(mapping=PhotoScan.GenericMapping)
             chunk.buildTexture(blending=PhotoScan.MosaicBlending, size=4096)
 
-# TODO: Need to fix. Network job failing at BuildDenseCloud.
 def auto_phase_two_nside():
     """Build dense cloud, model, create mask from model, align chunks."""
     chunks = []
@@ -276,7 +246,7 @@ def auto_phase_two_nside():
                   'match_filter_mask': 1,
                   'match_point_limit': 80000,
                   'network_distribute': True}]
-        queue_network_tasks(chunks, tasks)
+        add_network_tasks_to_queue(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
@@ -301,7 +271,7 @@ def auto_phase_three():
                   'tiepoint_limit': '0'},
                  {'name': 'AlignCameras',
                   'network_distribute': True}]
-        queue_network_tasks([PhotoScan.app.document.chunk], tasks)
+        add_network_tasks_to_queue([PhotoScan.app.document.chunk], tasks)
     else:
         chunk = PhotoScan.app.document.chunk
         chunk.matchPhotos(accuracy=PhotoScan.HighAccuracy,
@@ -340,7 +310,7 @@ def auto_phase_four():
                   'texture_count': 1,
                   'texture_size': 4096,
                   'network_distribute': True}]
-        queue_network_tasks(chunks, tasks)
+        add_network_tasks_to_queue(chunks, tasks)
     else:
         for chunk in chunks:
             chunk.buildDenseCloud(quality=PhotoScan.MediumQuality)
@@ -361,10 +331,7 @@ def delete_and_optimize_all():
 
 def rescale(val, in_array, out_array):
     """Rescale array of values to arbitrary scale"""
-    return min(out_array) \
-           + (val - min(in_array)) \
-           * ((max(out_array) - min(out_array)) \
-           / (max(in_array) - min(in_array)))
+    return min(out_array) + (val - min(in_array)) * ((max(out_array) - min(out_array)) / (max(in_array) - min(in_array)))
 
 def find_nearest(array, value):
     """I forget why I created this."""
@@ -377,7 +344,7 @@ def find_nearest(array, value):
             idx = index
     return array.index(idx)
 
-def ramp_reprojection():
+def ramp_gradual_selection_reprojectionerror():
     """Performs a gradual selection using 'reprojection error' with ramp method."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
@@ -404,7 +371,7 @@ def ramp_reprojection():
     elbow = find_nearest(angles, 45)
     return elbow
 
-def reprojectionerror():
+def gradual_selection_reprojectionerror():
     """Performs a gradual selection using 'reprojection error'."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
@@ -437,14 +404,14 @@ def reprojectionerror():
             thresh_jump = thresh_jump / 10
     return thresh
 
-def reconstructionuncertainty_ten():
+def gradualselection_reconstructionuncertainty_ten():
     """Performs a gradual selection using 'reconstruction uncertainty' with 10."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
                             PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
     point_cloud_filter.selectPoints(10)
 
-def reconstructionuncertainty():
+def gradualselection_reconstructionuncertainty():
     """Performs a gradual selection using 'reconstruction uncertainty' with 10%."""
     point_cloud_filter = PhotoScan.PointCloud.Filter()
     point_cloud_filter.init(PhotoScan.app.document.chunk,
@@ -598,13 +565,10 @@ PhotoScan.app.addMenuItem("Optimize/Cameras/All", optimize_all)
 PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 1", optimize_sparse_cloud)
 PhotoScan.app.addMenuItem("Optimize/Chunk/Sparse Cloud method 2", optimize_sparse_cloud_new)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10",
-                          reconstructionuncertainty_ten)
+                          gradualselection_reconstructionuncertainty_ten)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reconstruction Uncertainty 10%",
-                          reconstructionuncertainty)
+                          gradualselection_reconstructionuncertainty)
 PhotoScan.app.addMenuItem("Optimize/Selection/Reprojection Error",
-                          reprojectionerror)
+                          gradual_selection_reprojectionerror)
 
 PhotoScan.app.addMenuItem("Parts/Add Scale Bars", add_scalebars_to_chunk)
-PhotoScan.app.addMenuItem("Parts/Set UID_FOLDER", set_uid_folder)
-PhotoScan.app.addMenuItem("Parts/Add Images to Workspace", add_images_to_workspace_nside)
-PhotoScan.app.addMenuItem("Parts/Add Optimization Chunks", auto_setup_optimize)
